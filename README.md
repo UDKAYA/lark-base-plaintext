@@ -72,6 +72,29 @@ Panelde yalnızca mağaza eklentileri varsa ve **URL girme seçeneği yoksa**, g
 
 ---
 
+## Lark ana sayfasında gösterme — Base App'e özel eklenti olarak ekleme
+
+Bu eklentiyi Lark'ın ana ekranında **paylaşılabilir bir uygulama** olarak sunmanın yolu,
+onu bir **Base App** (no-code uygulama) içine **özel eklenti bloğu (Extension block)**
+olarak eklemektir. Ayrı bir backend ya da uygulama kaydı gerekmez — barındırılan URL yeterli.
+
+1. Base'ini bir **Base workspace** içine koy (Base App'ler workspace ister).
+2. **Base App oluştur:** Base ana sayfasında **New App**, ya da base içinde sol alttaki
+   **App** düğmesiyle mevcut veriden hızlı uygulama.
+3. Bir **sayfa** ekle → **Add Block → Extensions → More** → sol altta **Add Custom** →
+   servis URL'sini gir: `https://udkaya.github.io/lark-base-plaintext/` → **Confirm**.
+4. Eklentiyi yapılandır (tablo / görünüm / filtre / **Current User** / alanlar / metin stili).
+5. **App permissions** ile rolleri ayarla; **Share** ile bağlantı/QR ver ve kurum kapsamını
+   seç. Uygulama artık ana sayfada / mobilde (Lark 7.59+) açılabilir.
+
+**Kime hangi veri görünür?**
+- Eklentinin **Current User** filtresi, her kullanıcıya kendi kayıtlarını gösterir.
+- ⚠️ Bu filtre **istemci tarafındadır** (görüntü kolaylığı için); tek başına bir **güvenlik
+  sınırı değildir**. Kullanıcıların birbirinin satırını hiç çekememesi gerekiyorsa, veri
+  izolasyonunu **Base App rol izinleri** veya base **gelişmiş (satır bazlı) izinleri** ile kur.
+
+---
+
 ## Otomatik dağıtım (GitHub Pages)
 
 `.github/workflows/deploy.yml` her `main` push'unda projeyi build alıp GitHub Pages'e
