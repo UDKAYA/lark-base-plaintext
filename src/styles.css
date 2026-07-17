@@ -25,12 +25,65 @@
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
   font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-size: 13px;
+}
+
+/* View modu: temiz widget */
+.widget {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: #ffffff;
+}
+.widget-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.widget-body {
+  flex: 1;
+}
+
+/* Config modu: önizleme kutusu (beyaz zemin, seçilen renk her yerde tutarlı) */
+.preview {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  min-height: 60px;
+  max-height: 240px;
+  overflow: auto;
+}
+
+/* Kaydet çubuğu */
+.save-bar {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0 4px;
+  background: linear-gradient(to top, var(--bg) 78%, transparent);
+}
+.save-bar .btn.primary {
+  align-self: stretch;
+  text-align: center;
+  padding: 10px;
 }
 
 .app {

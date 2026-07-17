@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
+import { dashboard, DashboardState } from '@lark-base-open/js-sdk';
+import '@lark-base-open/js-sdk/dist/style/dashboard.css';
 import {
   cellToString,
   extractUserIds,
@@ -39,7 +41,6 @@ const OP_LABELS: Record<Op, string> = {
   lte: '≤ (küçük/eşit)',
 };
 
-// Değer kutusu gerektirmeyen operatörler
 const NO_VALUE_OPS: Op[] = ['empty', 'notEmpty'];
 
 interface Condition {
@@ -111,7 +112,55 @@ const USER_FIELD_TYPES = [11, 1003, 1004];
 
 let condKeyCounter = 1;
 
-/* ---------------- Küçük yardımcı bileşenler ---------------- */
+/* ---------------- Kalıcı yapılandırma (customConfig) ---------------- */
+
+interface WidgetConfig {
+  title: string;
+  tableId: string;
+  viewId: string;
+  conjunction: 'and' | 'or';
+  conditions: Condition[];
+  onlyMine: boolean;
+  mineFieldId: string;
+  displayFieldIds: string[];
+  recordSepIdx: number;
+  fieldSepIdx: number;
+  showFieldNames: boolean;
+  removeEmpty: boolean;
+  dedupe: boolean;
+  fontSize: number;
+  fontWeight: number;
+  lineHeight: number;
+  letterSpacing: number;
+  align: 'left' | 'center' | 'right';
+  fontFamily: 'sans' | 'serif' | 'mono';
+  color: string;
+}
+
+const DEFAULT_CONFIG: WidgetConfig = {
+  title: '',
+  tableId: '',
+  viewId: '',
+  conjunction: 'and',
+  conditions: [],
+  onlyMine: false,
+  mineFieldId: '',
+  displayFieldIds: [],
+  recordSepIdx: 0,
+  fieldSepIdx: 0,
+  showFieldNames: false,
+  removeEmpty: true,
+  dedupe: false,
+  fontSize: 16,
+  fontWeight: 400,
+  lineHeight: 1.5,
+  letterSpacing: 0,
+  align: 'left',
+  fontFamily: 'sans',
+  color: '#1f2329',
+};
+
+/* ---------------- Yardımcı bileşen ---------------- */
 
 function Slider(props: {
   label: string;
@@ -147,46 +196,44 @@ function Slider(props: {
 
 export default function App() {
   const [phase, setPhase] = useState<'loading' | 'ready' | 'no-host'>('loading');
-  const [error, setError] = useState('');
+  const [dashState, setDashState] = useState<DashboardState | null>(null);
+  const [config, setConfig] = useState<WidgetConfig>(DEFAULT_CONFIG);
 
   const [tables, setTables] = useState<Meta[]>([]);
-  const [tableId, setTableId] = useState('');
   const [fields, setFields] = useState<Meta[]>([]);
   const [views, setViews] = useState<Meta[]>([]);
-  const [viewId, setViewId] = useState('');
-
-  const [displayFieldIds, setDisplayFieldIds] = useState<string[]>([]);
-  const [conjunction, setConjunction] = useState<'and' | 'or'>('and');
-  const [conditions, setConditions] = useState<Condition[]>([]);
-
-  // Geçerli kullanıcı (Current User) filtresi
-  const [onlyMine, setOnlyMine] = useState(false);
-  const [mineFieldId, setMineFieldId] = useState('');
-  const [currentUserId, setCurrentUserId] = useState('');
-
   const [rows, setRows] = useState<Row[]>([]);
+  const [currentUserId, setCurrentUserId] = useState('');
   const [loadingRows, setLoadingRows] = useState(false);
-
-  // Çıktı seçenekleri
-  const [recordSepIdx, setRecordSepIdx] = useState(0);
-  const [fieldSepIdx, setFieldSepIdx] = useState(0);
-  const [showFieldNames, setShowFieldNames] = useState(false);
-  const [removeEmpty, setRemoveEmpty] = useState(true);
-  const [dedupe, setDedupe] = useState(false);
-
-  // Metin stili
-  const [fontSize, setFontSize] = useState(16);
-  const [fontWeight, setFontWeight] = useState(400);
-  const [lineHeight, setLineHeight] = useState(1.5);
-  const [letterSpacing, setLetterSpacing] = useState(0);
-  const [align, setAlign] = useState<'left' | 'center' | 'right'>('left');
-  const [fontFamily, setFontFamily] = useState<'sans' | 'serif' | 'mono'>('sans');
-  const [color, setColor] = useState('#1f2329');
-
+  const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ---- İlk yükleme: Lark bağlantısını test et + tabloları al ---- */
+  const patch = useCallback(
+    (p: Partial<WidgetConfig>) => setConfig((c) => ({ ...c, ...p })),
+    [],
+  );
+
+  // Kaydedilmiş customConfig'i state'e uygula (koşul anahtarlarını garanti et)
+  const applyCustomConfig = useCallback((cc: Record<string, unknown> | undefined | null) => {
+    if (!cc) return;
+    setConfig((prev) => {
+      const merged = { ...prev, ...(cc as Partial<WidgetConfig>) };
+      merged.conditions = (merged.conditions ?? []).map((c) => ({
+        ...c,
+        key: c.key ?? condKeyCounter++,
+      }));
+      return merged;
+    });
+  }, []);
+
+  const isConfigMode =
+    dashState === null ||
+    dashState === DashboardState.Config ||
+    dashState === DashboardState.Create;
+
+  /* ---- İlk yükleme ---- */
   useEffect(() => {
     let cancelled = false;
     const withTimeout = <T,>(p: Promise<T>, ms: number) =>
@@ -195,15 +242,35 @@ export default function App() {
         new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
       ]);
 
+    // Dashboard host'unda mıyız? (senkron okuma)
+    let st: DashboardState | null = null;
+    try {
+      st = dashboard && dashboard.state != null ? dashboard.state : null;
+    } catch {
+      st = null;
+    }
+    setDashState(st);
+
     (async () => {
       try {
         const metas = await withTimeout(getTableMetas(), 6000);
         if (cancelled) return;
-        const active = await getActiveTableId().catch(() => null);
         setTables(metas);
-        const initial =
-          active && metas.some((m) => m.id === active) ? active : metas[0]?.id ?? '';
-        setTableId(initial);
+
+        if (st !== null && st !== DashboardState.Create) {
+          // Kaydedilmiş yapılandırmayı yükle
+          const cfg = await dashboard.getConfig().catch(() => null);
+          if (cfg && (cfg as { customConfig?: Record<string, unknown> }).customConfig) {
+            applyCustomConfig((cfg as { customConfig?: Record<string, unknown> }).customConfig);
+          }
+        } else {
+          // Yeni widget ya da panel modu: aktif tabloyu varsayılan yap
+          const active = await getActiveTableId().catch(() => null);
+          const initial =
+            active && metas.some((m) => m.id === active) ? active : metas[0]?.id ?? '';
+          patch({ tableId: initial });
+        }
+
         setPhase('ready');
         getCurrentUserId()
           .then((id) => {
@@ -215,27 +282,49 @@ export default function App() {
       }
     })();
 
+    // Yapılandırma değişikliklerini dinle (dashboard host)
+    let off: (() => void) | undefined;
+    if (st !== null) {
+      try {
+        off = dashboard.onConfigChange((r) => {
+          const cc = (r as { data?: { customConfig?: Record<string, unknown> } })?.data
+            ?.customConfig;
+          if (!cancelled) applyCustomConfig(cc);
+        });
+      } catch {
+        /* yoksay */
+      }
+    }
+
     return () => {
       cancelled = true;
+      if (off) {
+        try {
+          off();
+        } catch {
+          /* yoksay */
+        }
+      }
     };
-  }, []);
+  }, [applyCustomConfig, patch]);
 
   /* ---- Tablo değişince alanları + görünümleri yükle ---- */
   useEffect(() => {
-    if (!tableId) return;
+    if (!config.tableId) {
+      setFields([]);
+      setViews([]);
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
-        const [f, v] = await Promise.all([getFieldMetas(tableId), getViewMetas(tableId)]);
+        const [f, v] = await Promise.all([
+          getFieldMetas(config.tableId),
+          getViewMetas(config.tableId),
+        ]);
         if (cancelled) return;
         setFields(f);
         setViews(v);
-        setViewId('');
-        setConditions([]);
-        setDisplayFieldIds(f.length ? [f[0].id] : []);
-        const uf = f.filter((m) => m.type !== undefined && USER_FIELD_TYPES.includes(m.type));
-        setMineFieldId((uf[0] ?? f[0])?.id ?? '');
-        setOnlyMine(false);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -243,22 +332,38 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [tableId]);
+  }, [config.tableId]);
 
-  /* ---- Kayıtları yükle (tablo/görünüm değişince) ---- */
+  /* ---- Alanlar yüklenince boş varsayılanları doldur (yalnızca tablo değişiminde) ---- */
+  useEffect(() => {
+    if (!fields.length) return;
+    setConfig((c) => {
+      let next = c;
+      if (c.displayFieldIds.length === 0) {
+        next = { ...next, displayFieldIds: [fields[0].id] };
+      }
+      if (!c.mineFieldId) {
+        const uf = fields.filter((m) => m.type !== undefined && USER_FIELD_TYPES.includes(m.type));
+        next = { ...next, mineFieldId: (uf[0] ?? fields[0])?.id ?? '' };
+      }
+      return next;
+    });
+  }, [fields]);
+
+  /* ---- Kayıtları yükle ---- */
   const reloadRows = useCallback(async () => {
-    if (!tableId) return;
+    if (!config.tableId) return;
     setLoadingRows(true);
     setError('');
     try {
-      const r = await getRows(tableId, viewId || undefined);
+      const r = await getRows(config.tableId, config.viewId || undefined);
       setRows(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingRows(false);
     }
-  }, [tableId, viewId]);
+  }, [config.tableId, config.viewId]);
 
   useEffect(() => {
     reloadRows();
@@ -269,7 +374,6 @@ export default function App() {
     [fields],
   );
 
-  // Kişi (User) tipi alanlar; enum farklıysa güvenli tarafta kalmak için tüm alanları göster
   const userFields = useMemo(() => {
     const u = fields.filter((f) => f.type !== undefined && USER_FIELD_TYPES.includes(f.type));
     return u.length ? u : fields;
@@ -277,60 +381,91 @@ export default function App() {
 
   /* ---- Filtre uygula ---- */
   const filteredRows = useMemo(() => {
-    const active = conditions.filter(
+    const active = config.conditions.filter(
       (c) => c.fieldId && (NO_VALUE_OPS.includes(c.op) || c.value.trim() !== ''),
     );
     return rows.filter((row) => {
-      // Sadece geçerli kullanıcının kayıtları (seçilen kişi alanı == geçerli kullanıcı)
-      if (onlyMine && mineFieldId) {
-        const ids = extractUserIds(row.fields[mineFieldId]);
+      if (config.onlyMine && config.mineFieldId) {
+        const ids = extractUserIds(row.fields[config.mineFieldId]);
         if (!currentUserId || !ids.includes(currentUserId)) return false;
       }
       if (active.length === 0) return true;
       const results = active.map((c) =>
         testCondition(cellToString(row.fields[c.fieldId]), c.op, c.value),
       );
-      return conjunction === 'and' ? results.every(Boolean) : results.some(Boolean);
+      return config.conjunction === 'and' ? results.every(Boolean) : results.some(Boolean);
     });
-  }, [rows, conditions, conjunction, onlyMine, mineFieldId, currentUserId]);
+  }, [rows, config.conditions, config.conjunction, config.onlyMine, config.mineFieldId, currentUserId]);
 
-  /* ---- Satırları metne çevir ---- */
-  const fieldSep = FIELD_SEPS[fieldSepIdx].value;
-  const recordSep = RECORD_SEPS[recordSepIdx].value;
+  const fieldSep = FIELD_SEPS[config.fieldSepIdx].value;
+  const recordSep = RECORD_SEPS[config.recordSepIdx].value;
 
   const lines = useMemo(() => {
     let ls = filteredRows.map((row) =>
-      displayFieldIds
+      config.displayFieldIds
         .map((fid) => {
           const s = cellToString(row.fields[fid]);
-          return showFieldNames ? `${fieldName(fid)}: ${s}` : s;
+          return config.showFieldNames ? `${fieldName(fid)}: ${s}` : s;
         })
         .join(fieldSep),
     );
-    if (removeEmpty) ls = ls.filter((s) => s.trim() !== '');
-    if (dedupe) ls = Array.from(new Set(ls));
+    if (config.removeEmpty) ls = ls.filter((s) => s.trim() !== '');
+    if (config.dedupe) ls = Array.from(new Set(ls));
     return ls;
-  }, [filteredRows, displayFieldIds, showFieldNames, fieldSep, removeEmpty, dedupe, fieldName]);
+  }, [
+    filteredRows,
+    config.displayFieldIds,
+    config.showFieldNames,
+    fieldSep,
+    config.removeEmpty,
+    config.dedupe,
+    fieldName,
+  ]);
 
   const outputText = useMemo(() => lines.join(recordSep), [lines, recordSep]);
 
-  /* ---- Eylemler ---- */
-  const addCondition = () =>
-    setConditions((c) => [
-      ...c,
-      { key: condKeyCounter++, fieldId: fields[0]?.id ?? '', op: 'contains', value: '' },
-    ]);
+  /* ---- View modunda host'a "çizildi" bildir (ekran görüntüsü için) ---- */
+  useEffect(() => {
+    if (dashState !== null && !isConfigMode && !loadingRows) {
+      try {
+        dashboard.setRendered();
+      } catch {
+        /* yoksay */
+      }
+    }
+  }, [dashState, isConfigMode, loadingRows, outputText]);
 
-  const updateCondition = (key: number, patch: Partial<Condition>) =>
-    setConditions((c) => c.map((cond) => (cond.key === key ? { ...cond, ...patch } : cond)));
+  /* ---- Eylemler ---- */
+  const onTableChange = (id: string) =>
+    patch({
+      tableId: id,
+      viewId: '',
+      conditions: [],
+      displayFieldIds: [],
+      onlyMine: false,
+      mineFieldId: '',
+    });
+
+  const addCondition = () =>
+    patch({
+      conditions: [
+        ...config.conditions,
+        { key: condKeyCounter++, fieldId: fields[0]?.id ?? '', op: 'contains', value: '' },
+      ],
+    });
+
+  const updateCondition = (key: number, p: Partial<Condition>) =>
+    patch({ conditions: config.conditions.map((c) => (c.key === key ? { ...c, ...p } : c)) });
 
   const removeCondition = (key: number) =>
-    setConditions((c) => c.filter((cond) => cond.key !== key));
+    patch({ conditions: config.conditions.filter((c) => c.key !== key) });
 
   const toggleDisplayField = (id: string) =>
-    setDisplayFieldIds((ids) =>
-      ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id],
-    );
+    patch({
+      displayFieldIds: config.displayFieldIds.includes(id)
+        ? config.displayFieldIds.filter((x) => x !== id)
+        : [...config.displayFieldIds, id],
+    });
 
   const copy = async () => {
     try {
@@ -339,54 +474,108 @@ export default function App() {
       if (copyTimer.current) clearTimeout(copyTimer.current);
       copyTimer.current = setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* pano erişimi yoksa sessizce geç */
+      /* pano yoksa geç */
     }
   };
 
-  /* ---- Ekranlar ---- */
-  if (phase === 'loading') {
-    return <div className="state">Lark Base'e bağlanılıyor…</div>;
-  }
-
-  if (phase === 'no-host') {
-    return (
-      <div className="state">
-        <h3>Bu eklenti Lark Base içinde çalışır</h3>
-        <p>
-          Sayfayı doğrudan tarayıcıda açtın. Veriyi görmek için bu adresi bir Lark Base
-          tablosunda <b>eklenti (uzantı)</b> olarak yükle. Adımlar README dosyasında.
-        </p>
-      </div>
-    );
-  }
+  const handleSave = async () => {
+    try {
+      await dashboard.saveConfig({
+        customConfig: config as unknown as Record<string, unknown>,
+        dataConditions: [],
+      });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
 
   const textStyle: CSSProperties = {
-    fontSize,
-    fontWeight,
-    lineHeight,
-    letterSpacing: `${letterSpacing}px`,
-    textAlign: align,
-    fontFamily: FONTS[fontFamily],
-    color,
+    fontSize: config.fontSize,
+    fontWeight: config.fontWeight,
+    lineHeight: config.lineHeight,
+    letterSpacing: `${config.letterSpacing}px`,
+    textAlign: config.align,
+    fontFamily: FONTS[config.fontFamily],
+    color: config.color,
     whiteSpace: 'pre-wrap',
     wordBreak: 'break-word',
     margin: 0,
   };
 
+  /* ---- Ekranlar ---- */
+  if (phase === 'loading') {
+    return <div className="state">Lark'a bağlanılıyor…</div>;
+  }
+
+  if (phase === 'no-host') {
+    return (
+      <div className="state">
+        <h3>Bu bileşen Lark içinde çalışır</h3>
+        <p>
+          Sayfayı doğrudan tarayıcıda açtın. Veriyi görmek için bunu bir Lark Base tablosuna
+          ya da Base App sayfasına <b>özel eklenti</b> olarak ekle. Adımlar README'de.
+        </p>
+      </div>
+    );
+  }
+
+  // VIEW modu: sadece temiz veri (widget)
+  if (dashState !== null && !isConfigMode) {
+    return (
+      <div className="widget">
+        {config.title && <div className="widget-title">{config.title}</div>}
+        <div className="widget-body" style={textStyle}>
+          {outputText || '—'}
+        </div>
+      </div>
+    );
+  }
+
+  // CONFIG / panel modu: önizleme + ayarlar (+ dashboard ise Kaydet)
   return (
     <div className="app">
       <header className="app-head">
         <h1>Düz Metin Görüntüleyici</h1>
-        <p className="sub">Tablo → filtre → seçili alanları ölçeklenebilir metin olarak göster</p>
+        <p className="sub">Ayarla → Kaydet → ana ekranda widget olarak görünsün</p>
       </header>
+
+      {/* Canlı önizleme */}
+      <section className="card">
+        <div className="card-title">
+          Önizleme
+          <span className="count">
+            {lines.length} kayıt{loadingRows ? ' · yükleniyor…' : ''}
+          </span>
+        </div>
+        <div className="preview">
+          {config.title && <div className="widget-title">{config.title}</div>}
+          <div style={textStyle}>{outputText || '—'}</div>
+        </div>
+        {error && <p className="err">{error}</p>}
+        <button className="btn ghost" onClick={copy} disabled={!outputText}>
+          {copied ? '✓ Kopyalandı' : 'Panoya kopyala'}
+        </button>
+      </section>
 
       {/* Kaynak */}
       <section className="card">
         <div className="card-title">1 · Kaynak</div>
 
         <label className="field">
+          <span>Başlık (opsiyonel)</span>
+          <input
+            type="text"
+            placeholder="ör. Ekibim"
+            value={config.title}
+            onChange={(e) => patch({ title: e.target.value })}
+          />
+        </label>
+
+        <label className="field">
           <span>Tablo</span>
-          <select value={tableId} onChange={(e) => setTableId(e.target.value)}>
+          <select value={config.tableId} onChange={(e) => onTableChange(e.target.value)}>
             {tables.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
@@ -397,7 +586,7 @@ export default function App() {
 
         <label className="field">
           <span>Görünüm (Lark filtresini uygular)</span>
-          <select value={viewId} onChange={(e) => setViewId(e.target.value)}>
+          <select value={config.viewId} onChange={(e) => patch({ viewId: e.target.value })}>
             <option value="">Tüm kayıtlar (görünüm filtresi yok)</option>
             {views.map((v) => (
               <option key={v.id} value={v.id}>
@@ -416,17 +605,17 @@ export default function App() {
       <section className="card">
         <div className="card-title">
           2 · Filtre
-          {conditions.length > 1 && (
+          {config.conditions.length > 1 && (
             <div className="seg">
               <button
-                className={conjunction === 'and' ? 'on' : ''}
-                onClick={() => setConjunction('and')}
+                className={config.conjunction === 'and' ? 'on' : ''}
+                onClick={() => patch({ conjunction: 'and' })}
               >
                 VE
               </button>
               <button
-                className={conjunction === 'or' ? 'on' : ''}
-                onClick={() => setConjunction('or')}
+                className={config.conjunction === 'or' ? 'on' : ''}
+                onClick={() => patch({ conjunction: 'or' })}
               >
                 VEYA
               </button>
@@ -434,21 +623,23 @@ export default function App() {
           )}
         </div>
 
-        {/* Geçerli kullanıcı (Current User) */}
         <div className="mine">
           <label className="mine-toggle">
             <input
               type="checkbox"
-              checked={onlyMine}
-              onChange={(e) => setOnlyMine(e.target.checked)}
+              checked={config.onlyMine}
+              onChange={(e) => patch({ onlyMine: e.target.checked })}
             />
             Sadece geçerli kullanıcının (Current User) kayıtları
           </label>
-          {onlyMine && (
+          {config.onlyMine && (
             <>
               <label className="field">
                 <span>Eşleştirilecek kişi alanı</span>
-                <select value={mineFieldId} onChange={(e) => setMineFieldId(e.target.value)}>
+                <select
+                  value={config.mineFieldId}
+                  onChange={(e) => patch({ mineFieldId: e.target.value })}
+                >
                   {userFields.map((f) => (
                     <option key={f.id} value={f.id}>
                       {f.name}
@@ -461,9 +652,9 @@ export default function App() {
           )}
         </div>
 
-        {conditions.length === 0 && <p className="hint">Ek koşul yok.</p>}
+        {config.conditions.length === 0 && <p className="hint">Ek koşul yok.</p>}
 
-        {conditions.map((cond) => {
+        {config.conditions.map((cond) => {
           const needsValue = !NO_VALUE_OPS.includes(cond.op);
           return (
             <div className="cond" key={cond.key}>
@@ -512,10 +703,13 @@ export default function App() {
         <div className="card-title">3 · Gösterilecek alanlar</div>
         <div className="chips">
           {fields.map((f) => (
-            <label key={f.id} className={`chip ${displayFieldIds.includes(f.id) ? 'on' : ''}`}>
+            <label
+              key={f.id}
+              className={`chip ${config.displayFieldIds.includes(f.id) ? 'on' : ''}`}
+            >
               <input
                 type="checkbox"
-                checked={displayFieldIds.includes(f.id)}
+                checked={config.displayFieldIds.includes(f.id)}
                 onChange={() => toggleDisplayField(f.id)}
               />
               {f.name}
@@ -530,7 +724,10 @@ export default function App() {
         <div className="grid2">
           <label className="field">
             <span>Kayıt ayracı</span>
-            <select value={recordSepIdx} onChange={(e) => setRecordSepIdx(Number(e.target.value))}>
+            <select
+              value={config.recordSepIdx}
+              onChange={(e) => patch({ recordSepIdx: Number(e.target.value) })}
+            >
               {RECORD_SEPS.map((s, i) => (
                 <option key={s.label} value={i}>
                   {s.label}
@@ -540,7 +737,10 @@ export default function App() {
           </label>
           <label className="field">
             <span>Alan ayracı</span>
-            <select value={fieldSepIdx} onChange={(e) => setFieldSepIdx(Number(e.target.value))}>
+            <select
+              value={config.fieldSepIdx}
+              onChange={(e) => patch({ fieldSepIdx: Number(e.target.value) })}
+            >
               {FIELD_SEPS.map((s, i) => (
                 <option key={s.label} value={i}>
                   {s.label}
@@ -553,21 +753,25 @@ export default function App() {
           <label>
             <input
               type="checkbox"
-              checked={showFieldNames}
-              onChange={(e) => setShowFieldNames(e.target.checked)}
+              checked={config.showFieldNames}
+              onChange={(e) => patch({ showFieldNames: e.target.checked })}
             />
             Alan adını göster
           </label>
           <label>
             <input
               type="checkbox"
-              checked={removeEmpty}
-              onChange={(e) => setRemoveEmpty(e.target.checked)}
+              checked={config.removeEmpty}
+              onChange={(e) => patch({ removeEmpty: e.target.checked })}
             />
             Boşları gizle
           </label>
           <label>
-            <input type="checkbox" checked={dedupe} onChange={(e) => setDedupe(e.target.checked)} />
+            <input
+              type="checkbox"
+              checked={config.dedupe}
+              onChange={(e) => patch({ dedupe: e.target.checked })}
+            />
             Tekrarları kaldır
           </label>
         </div>
@@ -576,36 +780,47 @@ export default function App() {
       {/* Metin stili */}
       <section className="card">
         <div className="card-title">5 · Metin görünümü</div>
-        <Slider label="Boyut" value={fontSize} min={8} max={96} step={1} unit="px" onChange={setFontSize} />
+        <Slider
+          label="Boyut"
+          value={config.fontSize}
+          min={8}
+          max={96}
+          step={1}
+          unit="px"
+          onChange={(v) => patch({ fontSize: v })}
+        />
         <Slider
           label="Kalınlık"
-          value={fontWeight}
+          value={config.fontWeight}
           min={100}
           max={900}
           step={100}
-          onChange={setFontWeight}
+          onChange={(v) => patch({ fontWeight: v })}
         />
         <Slider
           label="Satır yüksekliği"
-          value={lineHeight}
+          value={config.lineHeight}
           min={1}
           max={3}
           step={0.1}
-          onChange={setLineHeight}
+          onChange={(v) => patch({ lineHeight: v })}
         />
         <Slider
           label="Harf aralığı"
-          value={letterSpacing}
+          value={config.letterSpacing}
           min={-2}
           max={12}
           step={0.5}
           unit="px"
-          onChange={setLetterSpacing}
+          onChange={(v) => patch({ letterSpacing: v })}
         />
         <div className="grid2">
           <label className="field">
             <span>Hizalama</span>
-            <select value={align} onChange={(e) => setAlign(e.target.value as typeof align)}>
+            <select
+              value={config.align}
+              onChange={(e) => patch({ align: e.target.value as WidgetConfig['align'] })}
+            >
               <option value="left">Sola</option>
               <option value="center">Ortala</option>
               <option value="right">Sağa</option>
@@ -614,8 +829,8 @@ export default function App() {
           <label className="field">
             <span>Yazı tipi</span>
             <select
-              value={fontFamily}
-              onChange={(e) => setFontFamily(e.target.value as typeof fontFamily)}
+              value={config.fontFamily}
+              onChange={(e) => patch({ fontFamily: e.target.value as WidgetConfig['fontFamily'] })}
             >
               <option value="sans">Sans (sistem)</option>
               <option value="serif">Serif</option>
@@ -625,30 +840,26 @@ export default function App() {
         </div>
         <label className="field">
           <span>Renk</span>
-          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+          <input
+            type="color"
+            value={config.color}
+            onChange={(e) => patch({ color: e.target.value })}
+          />
         </label>
       </section>
 
-      {/* Çıktı */}
-      <section className="card output-card">
-        <div className="card-title">
-          Sonuç
-          <span className="count">
-            {lines.length} kayıt{loadingRows ? ' · yükleniyor…' : ''}
-          </span>
+      {/* Kaydet (yalnızca dashboard/Base App bağlamında) */}
+      {dashState !== null && (
+        <div className="save-bar">
+          <button className="btn primary" onClick={handleSave}>
+            {saved ? '✓ Kaydedildi' : "Kaydet ve widget'a uygula"}
+          </button>
+          <p className="hint">
+            Kaydettikten sonra bileşen görünüm modunda yalnızca veriyi gösterir; herkes bunu
+            görür.
+          </p>
         </div>
-        {error && <p className="err">{error}</p>}
-        {displayFieldIds.length === 0 ? (
-          <p className="hint">Yukarıdan en az bir alan seç.</p>
-        ) : (
-          <div className="output" style={textStyle}>
-            {outputText || '—'}
-          </div>
-        )}
-        <button className="btn primary" onClick={copy} disabled={!outputText}>
-          {copied ? '✓ Kopyalandı' : 'Panoya kopyala'}
-        </button>
-      </section>
+      )}
     </div>
   );
 }
