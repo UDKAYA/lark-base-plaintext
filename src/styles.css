@@ -228,6 +228,24 @@ input[type='color'] {
   cursor: pointer;
 }
 
+/* "Sadece geçerli kullanıcı" bloğu */
+.mine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.mine-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 /* Kaydırıcılar */
 .ctrl {
   display: flex;

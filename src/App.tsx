@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
   cellToString,
+  extractUserIds,
   getActiveTableId,
+  getCurrentUserId,
   getFieldMetas,
   getRows,
   getTableMetas,
@@ -104,6 +106,9 @@ const FONTS: Record<'sans' | 'serif' | 'mono', string> = {
   mono: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
 };
 
+// Kişi (User) tipi alanların FieldType değerleri: User=11, CreatedUser=1003, ModifiedUser=1004
+const USER_FIELD_TYPES = [11, 1003, 1004];
+
 let condKeyCounter = 1;
 
 /* ---------------- Küçük yardımcı bileşenler ---------------- */
@@ -154,6 +159,11 @@ export default function App() {
   const [conjunction, setConjunction] = useState<'and' | 'or'>('and');
   const [conditions, setConditions] = useState<Condition[]>([]);
 
+  // Geçerli kullanıcı (Current User) filtresi
+  const [onlyMine, setOnlyMine] = useState(false);
+  const [mineFieldId, setMineFieldId] = useState('');
+  const [currentUserId, setCurrentUserId] = useState('');
+
   const [rows, setRows] = useState<Row[]>([]);
   const [loadingRows, setLoadingRows] = useState(false);
 
@@ -195,6 +205,11 @@ export default function App() {
           active && metas.some((m) => m.id === active) ? active : metas[0]?.id ?? '';
         setTableId(initial);
         setPhase('ready');
+        getCurrentUserId()
+          .then((id) => {
+            if (!cancelled) setCurrentUserId(id);
+          })
+          .catch(() => {});
       } catch {
         if (!cancelled) setPhase('no-host');
       }
@@ -218,6 +233,9 @@ export default function App() {
         setViewId('');
         setConditions([]);
         setDisplayFieldIds(f.length ? [f[0].id] : []);
+        const uf = f.filter((m) => m.type !== undefined && USER_FIELD_TYPES.includes(m.type));
+        setMineFieldId((uf[0] ?? f[0])?.id ?? '');
+        setOnlyMine(false);
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
       }
@@ -251,19 +269,30 @@ export default function App() {
     [fields],
   );
 
+  // Kişi (User) tipi alanlar; enum farklıysa güvenli tarafta kalmak için tüm alanları göster
+  const userFields = useMemo(() => {
+    const u = fields.filter((f) => f.type !== undefined && USER_FIELD_TYPES.includes(f.type));
+    return u.length ? u : fields;
+  }, [fields]);
+
   /* ---- Filtre uygula ---- */
   const filteredRows = useMemo(() => {
     const active = conditions.filter(
       (c) => c.fieldId && (NO_VALUE_OPS.includes(c.op) || c.value.trim() !== ''),
     );
-    if (active.length === 0) return rows;
     return rows.filter((row) => {
+      // Sadece geçerli kullanıcının kayıtları (seçilen kişi alanı == geçerli kullanıcı)
+      if (onlyMine && mineFieldId) {
+        const ids = extractUserIds(row.fields[mineFieldId]);
+        if (!currentUserId || !ids.includes(currentUserId)) return false;
+      }
+      if (active.length === 0) return true;
       const results = active.map((c) =>
         testCondition(cellToString(row.fields[c.fieldId]), c.op, c.value),
       );
       return conjunction === 'and' ? results.every(Boolean) : results.some(Boolean);
     });
-  }, [rows, conditions, conjunction]);
+  }, [rows, conditions, conjunction, onlyMine, mineFieldId, currentUserId]);
 
   /* ---- Satırları metne çevir ---- */
   const fieldSep = FIELD_SEPS[fieldSepIdx].value;
@@ -405,9 +434,34 @@ export default function App() {
           )}
         </div>
 
-        {conditions.length === 0 && (
-          <p className="hint">Koşul yok — tüm kayıtlar gösterilir.</p>
-        )}
+        {/* Geçerli kullanıcı (Current User) */}
+        <div className="mine">
+          <label className="mine-toggle">
+            <input
+              type="checkbox"
+              checked={onlyMine}
+              onChange={(e) => setOnlyMine(e.target.checked)}
+            />
+            Sadece geçerli kullanıcının (Current User) kayıtları
+          </label>
+          {onlyMine && (
+            <>
+              <label className="field">
+                <span>Eşleştirilecek kişi alanı</span>
+                <select value={mineFieldId} onChange={(e) => setMineFieldId(e.target.value)}>
+                  {userFields.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="hint">Geçerli kullanıcı kimliği: {currentUserId || '—'}</p>
+            </>
+          )}
+        </div>
+
+        {conditions.length === 0 && <p className="hint">Ek koşul yok.</p>}
 
         {conditions.map((cond) => {
           const needsValue = !NO_VALUE_OPS.includes(cond.op);

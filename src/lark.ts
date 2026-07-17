@@ -64,6 +64,28 @@ export async function getRows(tableId: string, viewId?: string): Promise<Row[]> 
   return rows;
 }
 
+/** Geçerli (giriş yapmış) kullanıcının Base içindeki kimliği. */
+export async function getCurrentUserId(): Promise<string> {
+  return bitable.bridge.getUserId();
+}
+
+/**
+ * Bir kişi (User) alanı hücresinden kullanıcı kimliklerini çıkarır.
+ * Hücre; tek bir { id } nesnesi ya da { id } dizisi olabilir.
+ */
+export function extractUserIds(value: unknown): string[] {
+  if (value === null || value === undefined) return [];
+  const arr = Array.isArray(value) ? value : [value];
+  const ids: string[] = [];
+  for (const v of arr) {
+    if (v && typeof v === 'object') {
+      const id = (v as Record<string, unknown>).id;
+      if (typeof id === 'string') ids.push(id);
+    }
+  }
+  return ids;
+}
+
 /**
  * Herhangi bir hücre değerini okunabilir düz metne çevirir.
  * Metin/sayı/checkbox, tekli-çoklu seçim, kişi, tarih, URL, e-posta,
