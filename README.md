@@ -6,11 +6,17 @@ harf aralığı, hizalaması, yazı tipi ve rengi kaydırıcılarla ayarlanır.
 
 Teknoloji: **React + TypeScript + Vite** ve resmi **`@lark-base-open/js-sdk`**.
 
+- **Repo:** https://github.com/UDKAYA/lark-base-plaintext
+- **Canlı (Lark'a yüklenebilir) URL:** https://udkaya.github.io/lark-base-plaintext/
+
+> Canlı URL'yi düz tarayıcıda açarsan "Bu eklenti Lark Base içinde çalışır" ekranını
+> görürsün — bu normaldir. Veri yalnızca eklenti Lark'ın içinden yüklendiğinde gelir.
+
 ---
 
 ## Özellikler
 
-- **Tablo seçimi** — Base içindeki tüm tablolar arasından seç (varsayılan: aktif tablo).
+- **Tablo seçimi** — Base içindeki tüm tablolar (varsayılan: aktif tablo).
 - **Görünüm seçimi** — Bir görünüm seçersen o görünümün **Lark'ta tanımlı filtre/sıralaması** uygulanır.
 - **Eklenti içi filtre** — Alan + operatör (`içerir`, `eşittir`, `boş`, `>`, `<` …) + değer;
   birden çok koşul **VE / VEYA** ile birleşir.
@@ -23,22 +29,12 @@ Teknoloji: **React + TypeScript + Vite** ve resmi **`@lark-base-open/js-sdk`**.
 
 ## Geliştirme (yerel)
 
-Gereksinim: Node 18+ (bu proje Node 26 ile test edildi).
+Gereksinim: Node 18+ (bu proje Node 26 ile geliştirildi).
 
 ```bash
 npm install
 npm run dev      # http://localhost:5173
-```
-
-`npm run dev` sunucusu açıkken bu URL'yi aşağıdaki gibi Lark Base'e eklenti olarak yükle.
-
-> Not: Sayfayı düz tarayıcıda açarsan "Bu eklenti Lark Base içinde çalışır" ekranını görürsün —
-> bu normaldir. Veri yalnızca Lark'ın içinden geldiğinde görünür.
-
-### Derleme
-
-```bash
-npm run build    # dist/ klasörünü üretir
+npm run build    # dist/ üretir
 npm run preview  # üretim derlemesini yerelde önizle
 ```
 
@@ -46,37 +42,44 @@ npm run preview  # üretim derlemesini yerelde önizle
 
 ## Lark Base'e yükleme
 
-Eklenti, **açtığın base'in içinde** çalışır (eklentiden başka bir base'e geçilmez —
-hangi base'i istiyorsan eklentiyi orada aç).
+Eklenti, **açtığın base'in içinde** çalışır — hangi base'i istiyorsan eklentiyi orada aç.
 
-### A) Geliştirme sırasında hızlı test (localhost)
+Lark sürümüne göre yükleme **iki yoldan** biriyle olur. Base'inde **Uzantılar / Extensions
+(🧩)** panelini aç ve hangisinin geçerli olduğuna bak:
 
-1. `npm run dev` çalışır durumda olsun (`http://localhost:5173`).
-2. Lark Base'te bir tablo aç.
-3. Sağ üstteki **Eklentiler / Uzantılar** (puzzle 🧩 simgesi) panelini aç.
-4. **Eklenti ekle → Geliştirme / Özel eklenti** (Add extension → Develop) seçeneğine gir.
-5. Geliştirme URL'si olarak **`http://localhost:5173`** gir ve ekle.
-6. Eklenti sağ panelde açılır; tablo/filtre/alan seç.
+### Yol 1 — URL ile ekleme (klasik "sidebar plugin")
 
-> Menü etiketleri Lark sürümüne göre "Extensions", "Plugins", "扩展" veya "Widgets"
-> şeklinde olabilir; aradığın şey **özel/geliştirme eklentisi ekleme (URL girme)** adımıdır.
-> Bu adımı bulamazsan resmi kılavuz: <https://lark-base-team.github.io/js-sdk-docs/>
+Panelde **özel/geliştirme eklentisi ekleme (URL girme)** seçeneği varsa:
 
-### B) Yayınlanmış URL ile (GitHub Pages / Vercel)
+1. Şu HTTPS URL'yi gir: `https://udkaya.github.io/lark-base-plaintext/`
+   (ya da yerelde `npm run dev` ardından `http://localhost:5173`)
+2. Eklenti sağ panelde açılır; tablo / görünüm / filtre / alan seç.
 
-Ekibinle paylaşmak için `dist/`'i statik olarak barındır ve o HTTPS URL'sini yukarıdaki
-5. adımda gir:
+### Yol 2 — Geliştirici konsolu + resmi CLI çerçevesi (güncel resmi akış)
 
-- **Vercel:** repoyu içe aktar → framework "Vite" → deploy. Verilen `https://…vercel.app` URL'sini kullan.
-- **GitHub Pages:** `npm run build` sonrası `dist/` içeriğini `gh-pages` dalına koy
-  (ya da bir GitHub Actions workflow'u ile). Proje sitesi alt yolda barındığı için
-  `vite.config.ts` içinde `base: './'` ayarı bunun için hazırdır.
+Panelde yalnızca mağaza eklentileri varsa ve **URL girme seçeneği yoksa**, güncel resmi
+çerçeve gereklidir:
 
-### C) Kalıcı / kurumsal yayın
+1. [open.larksuite.com](https://open.larksuite.com/) → bir **Base Extension** kaydı aç →
+   **App ID** + **BlockTypeID** al.
+2. Proje `app.json` (appId), `block.json` (blockTypeID + url) ve `debug.json` ile yapılandırılır.
+3. `npm run start` Base'i `debugPort` ile açar; tabloda **"yeni görünüm → daha fazla eklenti
+   ekle"** ile yerel bileşeni (`blk_...`) eklersin.
 
-Workspace'e ya da mağazaya yayınlamak için Lark Açık Platform (open.larksuite.com)
-geliştirici konsolundan bir **Base Extension** oluşturup `dist/`'i yükleyerek onay
-akışını izlemen gerekir.
+> Bu akış gerekiyorsa buradaki React arayüzü (`src/`) **aynen** taşınır; yalnızca iskelet
+> dosyaları (`app.json` / `block.json`) eklenir. Resmi kılavuz:
+> <https://open.larksuite.com/document/uAjLw4CM/uYjL24iN/base-extensions/>
+
+---
+
+## Otomatik dağıtım (GitHub Pages)
+
+`.github/workflows/deploy.yml` her `main` push'unda projeyi build alıp GitHub Pages'e
+yayınlar. Kod değişince canlı URL kendiliğinden güncellenir.
+
+Alternatif barındırma: **Vercel** (repoyu içe aktar → framework "Vite" → deploy) —
+gizli repolar için de çalışır. `vite.config.ts` içindeki `base: './'` ayarı alt yolda
+barındırmayı (Pages proje sitesi) destekler.
 
 ---
 
@@ -91,6 +94,7 @@ akışını izlemen gerekir.
 │   ├── App.tsx           # tüm arayüz + filtre/çıktı mantığı
 │   ├── lark.ts           # @lark-base-open/js-sdk sarmalayıcıları + hücre→metin
 │   └── styles.css        # açık/koyu tema stilleri
+├── .github/workflows/deploy.yml   # Pages otomatik deploy
 └── .claude/launch.json   # yerel önizleme yapılandırması (opsiyonel)
 ```
 
